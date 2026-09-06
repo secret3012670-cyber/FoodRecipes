@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>Taste.ai - 프리미엄 AI 레시피</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -27,6 +30,13 @@
         .glass-panel { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.4); }
         .dark .glass-panel { background: rgba(24, 24, 27, 0.85); border: 1px solid rgba(255, 255, 255, 0.08); }
         .hide-scrollbar::-webkit-scrollbar { display: none; }
+        
+        /* 토스트 메시지 애니메이션 추가 */
+        @keyframes toast-drop {
+            0% { transform: translate(-50%, -20px); opacity: 0; }
+            100% { transform: translate(-50%, 0); opacity: 1; }
+        }
+        .animate-toast { animation: toast-drop 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
     </style>
 </head>
 <body class="bg-slate-50 dark:bg-zinc-950 min-h-screen text-slate-800 dark:text-zinc-100 flex flex-col transition-colors duration-300">
@@ -39,75 +49,93 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        const apiKey = "AQ.Ab8RN6J0C7T6E2HSWgDQvMZYcdHEyy2HTg46Wkcxckqfwzy3Dw";
+        const categorySystemPrompt = `You are a professional culinary expert. When a user searches for a food or dish name, provide 4 to 5 popular and distinct variations or styles of this dish in Korean. Respond ONLY with a valid JSON object: {"categoryName": "음식이름", "subCategories": [{"name": "종류", "desc": "설명"}]}`;
+        const recipeSystemPrompt = `You are a professional AI chef. Provide a delicious recipe. Respond ONLY with a valid JSON object: {"title": "이름", "description": "소개", "prepTime": "15분", "cookTime": "20분", "servings": "2인분", "difficulty": "초급", "calories": "650 kcal", "estimatedCost": "12,000원", "ingredients": ["재료1", "재료2"], "steps": [{"instruction": "설명", "duration": "5분"}]}`;
 
-        const categorySystemPrompt = `You are a professional culinary expert. When a user searches for a food or dish name, provide 4 to 5 popular and distinct variations or styles of this dish in Korean with sophisticated descriptions.
-        Respond ONLY with a valid JSON object matching this schema:
-        {"categoryName": "음식이름", "subCategories": [{"name": "종류 이름", "desc": "세련된 설명"}]}`;
+        const getMockSubCategories = (query) => {
+            const cleanQuery = query.replace(/\s*\(데모\)/g, '').trim(); 
+            return {
+                categoryName: cleanQuery,
+                subCategories: [
+                    { name: `클래식 ${cleanQuery} (데모)`, desc: "가장 기본에 충실한 정통 오리지널 레시피입니다." },
+                    { name: `매콤한 ${cleanQuery} (데모)`, desc: "스트레스가 확 풀리는 기분 좋은 매운맛 스타일입니다." },
+                    { name: `초간단 ${cleanQuery} (데모)`, desc: "바쁜 날 15분 만에 뚝딱 완성하는 간편 스타일입니다." },
+                    { name: `프리미엄 ${cleanQuery} (데모)`, desc: "고급 식재료를 더해 레스토랑처럼 즐기는 스타일입니다." }
+                ]
+            };
+        };
 
-        const recipeSystemPrompt = `You are a professional AI chef. Provide a delicious, high-quality, and easy-to-follow recipe in Korean.
-        Respond ONLY with a valid JSON object matching this schema:
-        {"title": "음식 이름", "description": "고급스러운 소개", "prepTime": "15분", "cookTime": "20분", "servings": "2인분", "difficulty": "초급", "calories": "650 kcal", "estimatedCost": "12,000원", "ingredients": ["재료1 (용량)", "재료2 (용량)"], "steps": [{"instruction": "명확한 조리 방법", "duration": "5분"}]}`;
+        const getMockRecipe = (query) => {
+            const cleanQuery = query.replace(/\s*\(데모\)/g, '').trim(); 
+            return {
+                title: `시그니처 ${cleanQuery} (데모)`,
+                description: `이 레시피는 서버 지연으로 인해 자동으로 생성된 데모 데이터입니다. 실제 요리 과정과 유사하게 구성되어 앱의 기능을 체험하실 수 있습니다.`,
+                prepTime: "15분", cookTime: "20분", servings: "2인분", difficulty: "체험용",
+                calories: "580 kcal", estimatedCost: "약 15,000원",
+                ingredients: [`신선한 ${cleanQuery} 메인 재료 (300g)`, "엑스트라 버진 올리브 오일 (2큰술)", "천일염 (약간)", "통후추 (약간)", "가니쉬 용 허브 (약간)"],
+                steps: [
+                    { instruction: "모든 재료를 꼼꼼하게 세척하고 프렙(Prep) 과정을 마칩니다.", duration: "5분" },
+                    { instruction: "팬을 중불로 예열한 뒤, 오일을 두르고 향채소를 볶아 풍미를 끌어올립니다.", duration: "3분" },
+                    { instruction: "메인 재료를 넣고 겉면을 빠르게 조리하여 맛을 가둡니다.", duration: "5분" },
+                    { instruction: "불을 줄이고 소스가 재료에 깊이 스며들도록 은근히 조려줍니다.", duration: "6분" },
+                    { instruction: "따뜻한 플레이트에 보기 좋게 담아내어 완성합니다.", duration: "1분" }
+                ]
+            };
+        };
 
-        async function fetchFromGemini(promptText, systemPrompt) {
-            const models = ['gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-flash-latest'];
-            let lastError = "";
+        async function fetchFromGemini(promptText, systemPrompt, currentApiKey, type, query) {
+            const fallbackMock = async () => {
+                await new Promise(r => setTimeout(r, 600)); 
+                return { isDemo: true, data: type === 'category' ? getMockSubCategories(query) : getMockRecipe(query) };
+            };
 
-            for (let attempt = 0; attempt < 2; attempt++) {
-                for (let model of models) {
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-                    const payload = {
+            if (!currentApiKey || !currentApiKey.startsWith("AIza")) {
+                return fallbackMock();
+            }
+
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-goog-api-key': currentApiKey },
+                    body: JSON.stringify({
                         contents: [{ parts: [{ text: promptText }] }],
                         systemInstruction: { parts: [{ text: systemPrompt }] },
                         generationConfig: { responseMimeType: "application/json" }
-                    };
-
-                    try {
-                        const response = await fetch(url, {
-                            method: 'POST',
-                            headers: { 
-                                'Content-Type': 'application/json',
-                                'X-goog-api-key': apiKey
-                            },
-                            body: JSON.stringify(payload)
-                        });
-                        
-                        if (!response.ok) {
-                            const errorData = await response.json();
-                            const errMsg = errorData.error?.message || response.statusText;
-                            
-                            if (errMsg.toLowerCase().includes("high demand") || response.status === 503 || response.status === 429) {
-                                lastError = "현재 서버 사용량이 많아 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.";
-                                continue; 
-                            }
-                            
-                            lastError = `API 통신 오류: ${errMsg}`;
-                            continue;
-                        }
-                        
-                        const result = await response.json();
-                        let text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-                        
-                        if(text) {
-                            text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-                        }
-                        
-                        return JSON.parse(text);
-                        
-                    } catch (error) {
-                        lastError = "네트워크 또는 통신 중 오류가 발생했습니다.";
-                    }
-                }
-                if(attempt === 0) await new Promise(res => setTimeout(res, 1500));
+                    })
+                });
+                
+                if (!response.ok) throw new Error("API Fails");
+                
+                const result = await response.json();
+                let text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                if(text) text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+                
+                return { isDemo: false, data: JSON.parse(text) };
+            } catch (error) {
+                return fallbackMock();
             }
-            throw new Error(lastError);
         }
 
+        function getSafeStorage(key, defaultValue) {
+            try { return localStorage.getItem(key) || defaultValue; } catch(e) { return defaultValue; }
+        }
+        function setSafeStorage(key, value) {
+            try { localStorage.setItem(key, value); } catch(e) {}
+        }
+        function removeSafeStorage(key) {
+            try { localStorage.removeItem(key); } catch(e) {}
+        }
+
+        let toastTimer = null; // 토스트 메시지 타이머용 변수
+
         function App() {
+            const [apiKey, setApiKey] = useState(() => getSafeStorage('gemini_api_key', "AQ.Ab8RN6J0C7T6E2HSWgDQvMZYcdHEyy2HTg46Wkcxckqfwzy3Dw"));
+            const [tempApiKey, setTempApiKey] = useState("");
+            
             const [query, setQuery] = useState('');
             const [loading, setLoading] = useState(false);
             const [recipe, setRecipe] = useState(null);
-            const [error, setError] = useState(null);
+            const [isDemoActive, setIsDemoActive] = useState(false);
             const [recentSearches, setRecentSearches] = useState([]);
             const [darkMode, setDarkMode] = useState(false);
             const [stepNotes, setStepNotes] = useState({});
@@ -116,36 +144,27 @@
             const [history, setHistory] = useState([]);
             const [showHistoryModal, setShowHistoryModal] = useState(false);
             const [showStatsModal, setShowStatsModal] = useState(false);
+            const [showSettingsModal, setShowSettingsModal] = useState(false);
             const [alreadyRecorded, setAlreadyRecorded] = useState(false);
             const [likesMap, setLikesMap] = useState({});
+            
+            // 커스텀 알림(토스트) 창 상태
+            const [toastMsg, setToastMsg] = useState(null);
 
             useEffect(() => {
-                try {
-                    const savedSearches = localStorage.getItem('recent_recipe_searches');
-                    if (savedSearches) {
-                        const parsed = JSON.parse(savedSearches);
-                        if(Array.isArray(parsed)) setRecentSearches(parsed);
-                    }
-                    
-                    const savedHistory = localStorage.getItem('cooking_history');
-                    if (savedHistory) {
-                        const parsed = JSON.parse(savedHistory);
-                        if(Array.isArray(parsed)) setHistory(parsed);
-                    }
-                    
-                    const savedLikes = localStorage.getItem('recipe_likes');
-                    if (savedLikes) {
-                        const parsed = JSON.parse(savedLikes);
-                        if(typeof parsed === 'object' && parsed !== null) setLikesMap(parsed);
-                    }
-                    
-                    const savedTheme = localStorage.getItem('theme');
-                    if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-                        setDarkMode(true);
-                        document.documentElement.classList.add('dark');
-                    }
-                } catch (e) {
-                    console.error("데이터 로드 에러:", e);
+                const savedSearches = getSafeStorage('recent_recipe_searches', null);
+                if (savedSearches) try { setRecentSearches(JSON.parse(savedSearches)); } catch(e){}
+                
+                const savedHistory = getSafeStorage('cooking_history', null);
+                if (savedHistory) try { setHistory(JSON.parse(savedHistory)); } catch(e){}
+                
+                const savedLikes = getSafeStorage('recipe_likes', null);
+                if (savedLikes) try { setLikesMap(JSON.parse(savedLikes)); } catch(e){}
+                
+                const savedTheme = getSafeStorage('theme', null);
+                if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                    setDarkMode(true);
+                    document.documentElement.classList.add('dark');
                 }
             }, []);
 
@@ -153,120 +172,75 @@
                 if (recipe) {
                     setAlreadyRecorded(false);
                     try {
-                        const savedNotes = localStorage.getItem(`notes_${recipe.title}`);
+                        const savedNotes = getSafeStorage(`notes_${recipe.title}`, null);
                         setStepNotes(savedNotes ? JSON.parse(savedNotes) : {});
-                        
-                        const savedChecks = localStorage.getItem(`checks_${recipe.title}`);
+                        const savedChecks = getSafeStorage(`checks_${recipe.title}`, null);
                         setCheckedSteps(savedChecks ? JSON.parse(savedChecks) : {});
-                    } catch(e) {
-                        setStepNotes({});
-                        setCheckedSteps({});
-                    }
+                    } catch(e) { setStepNotes({}); setCheckedSteps({}); }
                     
                     if (likesMap[recipe.title] === undefined) {
                         const defaultLikes = Math.floor(Math.random() * 80) + 20;
                         const updated = { ...likesMap, [recipe.title]: { count: defaultLikes, liked: false } };
                         setLikesMap(updated);
-                        localStorage.setItem('recipe_likes', JSON.stringify(updated));
+                        setSafeStorage('recipe_likes', JSON.stringify(updated));
                     }
                 }
             }, [recipe]);
 
-            const handleLikeToggle = () => {
-                if (!recipe) return;
-                const current = likesMap[recipe.title] || { count: 20, liked: false };
-                const newLiked = !current.liked;
-                const newCount = newLiked ? current.count + 1 : current.count - 1;
-                const updated = { ...likesMap, [recipe.title]: { count: newCount, liked: newLiked } };
-                setLikesMap(updated);
-                localStorage.setItem('recipe_likes', JSON.stringify(updated));
+            // 알림 띄우기 함수
+            const showToast = (msg) => {
+                setToastMsg(msg);
+                if(toastTimer) clearTimeout(toastTimer);
+                toastTimer = setTimeout(() => {
+                    setToastMsg(null);
+                }, 3000);
             };
 
-            const toggleCheckStep = (idx) => {
-                const updated = { ...checkedSteps, [idx]: !checkedSteps[idx] };
-                setCheckedSteps(updated);
-                if (recipe) localStorage.setItem(`checks_${recipe.title}`, JSON.stringify(updated));
-            };
-
-            const handleNoteChange = (idx, value) => {
-                const updated = { ...stepNotes, [idx]: value };
-                setStepNotes(updated);
-                if (recipe) localStorage.setItem(`notes_${recipe.title}`, JSON.stringify(updated));
+            const saveApiKey = () => {
+                if(tempApiKey.trim() === "") return;
+                setApiKey(tempApiKey.trim());
+                setSafeStorage('gemini_api_key', tempApiKey.trim());
+                setShowSettingsModal(false);
+                showToast("API 키가 저장되었습니다.");
             };
 
             const toggleDarkMode = () => {
                 setDarkMode(!darkMode);
                 document.documentElement.classList.toggle('dark');
-                localStorage.setItem('theme', !darkMode ? 'dark' : 'light');
-            };
-
-            const addRecentSearch = (searchTerm) => {
-                const trimmed = searchTerm.trim();
-                if (!trimmed) return;
-                setRecentSearches(prev => {
-                    const validPrev = Array.isArray(prev) ? prev : [];
-                    const updated = [trimmed, ...validPrev.filter(item => item !== trimmed)].slice(0, 10);
-                    localStorage.setItem('recent_recipe_searches', JSON.stringify(updated));
-                    return updated;
-                });
-            };
-
-            const removeRecentSearch = (e, term) => {
-                e.stopPropagation();
-                setRecentSearches(prev => {
-                    const validPrev = Array.isArray(prev) ? prev : [];
-                    const updated = validPrev.filter(item => item !== term);
-                    localStorage.setItem('recent_recipe_searches', JSON.stringify(updated));
-                    return updated;
-                });
-            };
-
-            const clearAllRecentSearches = () => {
-                setRecentSearches([]);
-                localStorage.removeItem('recent_recipe_searches');
-            };
-
-            const recordCookingHistory = () => {
-                if (!recipe || alreadyRecorded) return;
-                const newRecord = {
-                    title: recipe.title,
-                    date: new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' }),
-                    calories: recipe.calories,
-                    servings: recipe.servings,
-                    difficulty: recipe.difficulty
-                };
-                const currentHistory = Array.isArray(history) ? history : [];
-                const updatedHistory = [newRecord, ...currentHistory];
-                setHistory(updatedHistory);
-                localStorage.setItem('cooking_history', JSON.stringify(updatedHistory));
-                setAlreadyRecorded(true);
-            };
-
-            const clearHistory = () => {
-                if(confirm("모든 요리 기록을 삭제하시겠습니까?")) {
-                    setHistory([]);
-                    localStorage.removeItem('cooking_history');
-                }
+                setSafeStorage('theme', !darkMode ? 'dark' : 'light');
             };
 
             const handleSearch = async (searchTarget) => {
-                const target = searchTarget || query;
+                const target = typeof searchTarget === 'string' ? searchTarget : query;
                 const trimmed = target.trim();
-                if (!trimmed) return;
+                
+                // 검색어가 비어있을 경우 세련된 커스텀 알림(Toast) 출력
+                if (!trimmed) {
+                    showToast("요리 이름을 입력해주세요.");
+                    return;
+                }
 
-                if (!searchTarget) setQuery(trimmed);
-                addRecentSearch(trimmed);
+                if (typeof searchTarget === 'string') setQuery(trimmed);
+                
+                setRecentSearches(prev => {
+                    const validPrev = Array.isArray(prev) ? prev : [];
+                    const updated = [trimmed, ...validPrev.filter(item => item !== trimmed)].slice(0, 10);
+                    setSafeStorage('recent_recipe_searches', JSON.stringify(updated));
+                    return updated;
+                });
 
-                setError(null);
                 setRecipe(null);
                 setSubCategoryData(null);
+                setIsDemoActive(false);
                 setLoading(true);
 
                 try {
-                    const data = await fetchFromGemini(`"${trimmed}"의 다양한 세부 종류나 스타일 4가지를 알려주세요.`, categorySystemPrompt);
-                    setSubCategoryData(data);
-                } catch (err) {
-                    setError(err.message);
+                    const result = await fetchFromGemini(`"${trimmed}"의 세부 종류 4가지`, categorySystemPrompt, apiKey, 'category', trimmed);
+                    setIsDemoActive(result.isDemo);
+                    setSubCategoryData(result.data);
+                } catch(e) {
+                    setIsDemoActive(true);
+                    setSubCategoryData(getMockSubCategories(trimmed));
                 } finally {
                     setLoading(false);
                 }
@@ -274,17 +248,17 @@
 
             const executeFetchRecipe = async (target) => {
                 setQuery(target);
-                addRecentSearch(target);
-
-                setError(null);
                 setLoading(true);
                 setSubCategoryData(null);
+                setIsDemoActive(false);
 
                 try {
-                    const data = await fetchFromGemini(`"${target}" 레시피를 자세히 알려주세요.`, recipeSystemPrompt);
-                    setRecipe(data);
-                } catch (err) {
-                    setError(err.message);
+                    const result = await fetchFromGemini(`"${target}" 레시피`, recipeSystemPrompt, apiKey, 'recipe', target);
+                    setIsDemoActive(result.isDemo);
+                    setRecipe(result.data);
+                } catch(e) {
+                    setIsDemoActive(true);
+                    setRecipe(getMockRecipe(target));
                 } finally {
                     setLoading(false);
                 }
@@ -293,49 +267,44 @@
             const totalSteps = recipe?.steps?.length || 0;
             const completedCount = Object.values(checkedSteps).filter(Boolean).length;
             const progressPercent = totalSteps > 0 ? Math.round((completedCount / totalSteps) * 100) : 0;
-            const isFullyCompleted = totalSteps > 0 && completedCount === totalSteps;
-
-            useEffect(() => {
-                if (isFullyCompleted && !alreadyRecorded) recordCookingHistory();
-            }, [isFullyCompleted]);
-
-            const safeHistory = Array.isArray(history) ? history : [];
-            const totalCookCount = safeHistory.length;
-            const totalCaloriesNum = safeHistory.reduce((acc, cur) => {
-                const match = cur.calories?.match(/\d+/g);
-                return match ? acc + parseInt(match.join(''), 10) : acc;
-            }, 0);
-
-            const dishCounts = safeHistory.reduce((acc, cur) => {
-                if(cur && cur.title) acc[cur.title] = (acc[cur.title] || 0) + 1;
-                return acc;
-            }, {});
-
-            const chartData = Object.entries(dishCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
-            const maxChartCount = chartData.length > 0 ? Math.max(...chartData.map(item => item[1])) : 1;
-            const currentLikeData = recipe ? (likesMap[recipe.title] || { count: 0, liked: false }) : { count: 0, liked: false };
-
+            
             return (
-                <div className="flex flex-col min-h-screen">
-                    {/* Header */}
+                <div className="flex flex-col min-h-screen relative">
+                    
+                    {/* ★ 커스텀 토스트 알림창 ★ */}
+                    {toastMsg && (
+                        <div className="fixed top-20 sm:top-24 left-1/2 transform -translate-x-1/2 z-[100] bg-slate-800 dark:bg-white text-white dark:text-slate-900 px-6 py-3.5 rounded-full shadow-2xl flex items-center gap-3 animate-toast border border-slate-700 dark:border-slate-200 pointer-events-none">
+                            <i className="fa-solid fa-circle-exclamation text-amber-500"></i>
+                            <span className="font-bold text-sm tracking-tight">{toastMsg}</span>
+                        </div>
+                    )}
+
+                    {/* 데모 모드 알림 */}
+                    {isDemoActive && !loading && (subCategoryData || recipe) && (
+                        <div className="w-full bg-rose-600 text-white text-center py-2 px-4 text-xs sm:text-sm font-bold shadow-md z-50 flex items-center justify-center gap-2">
+                            <i className="fa-solid fa-triangle-exclamation animate-pulse"></i> 
+                            현재 서버 지연으로 인해 임의로 만들어진 데모 데이터입니다.
+                        </div>
+                    )}
+
                     <header className="sticky top-0 z-40 w-full glass-panel border-b border-slate-200/60 dark:border-zinc-800/60">
                         <div className="max-w-5xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between">
-                            <div 
-                                className="flex items-center gap-3 cursor-pointer group"
-                                onClick={() => { setRecipe(null); setSubCategoryData(null); setQuery(''); setError(null); }}
-                            >
-                                <div className="w-8 h-8 sm:w-10 sm:h-10 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-lg flex items-center justify-center text-sm sm:text-lg shadow-md transition-transform group-hover:scale-105">
+                            <div className="flex items-center gap-3 cursor-pointer group" onClick={() => { setRecipe(null); setSubCategoryData(null); setQuery(''); setIsDemoActive(false); }}>
+                                <div className="w-8 h-8 sm:w-10 sm:h-10 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-lg flex items-center justify-center text-sm sm:text-lg shadow-md">
                                     <i className="fa-solid fa-utensils"></i>
                                 </div>
                                 <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Taste.ai</h1>
                             </div>
                             
-                            <div className="flex items-center gap-3 sm:gap-5">
-                                <button type="button" onClick={() => setShowStatsModal(true)} className="hidden sm:flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white transition-colors">
-                                    <i className="fa-solid fa-chart-simple"></i> 통계
+                            <div className="flex items-center gap-2 sm:gap-4">
+                                <button type="button" onClick={() => setShowStatsModal(true)} className="hidden sm:flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900 dark:text-zinc-400">
+                                    <i className="fa-solid fa-chart-simple"></i>
                                 </button>
-                                <button type="button" onClick={() => setShowHistoryModal(true)} className="flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white transition-colors">
-                                    <i className="fa-solid fa-book-open"></i> 요리기록
+                                <button type="button" onClick={() => setShowHistoryModal(true)} className="flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900 dark:text-zinc-400">
+                                    <i className="fa-solid fa-book-open"></i>
+                                </button>
+                                <button type="button" onClick={() => { setTempApiKey(apiKey); setShowSettingsModal(true); }} className="flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900 dark:text-zinc-400 ml-1">
+                                    <i className="fa-solid fa-gear"></i>
                                 </button>
                                 <div className="w-px h-4 bg-slate-300 dark:bg-zinc-700 mx-1"></div>
                                 <button type="button" onClick={toggleDarkMode} className="w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-200 dark:text-zinc-400 dark:hover:bg-zinc-800 transition-colors">
@@ -345,11 +314,10 @@
                         </div>
                     </header>
 
-                    <main className="flex-1 w-full max-w-5xl mx-auto px-4 sm:px-6 py-10 sm:py-16">
+                    <main className="flex-1 w-full max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-16">
                         
-                        {/* Main Empty State */}
                         {!recipe && !subCategoryData && (
-                            <div className="flex flex-col items-center justify-center mt-4 sm:mt-12 text-center space-y-6">
+                            <div className="flex flex-col items-center justify-center mt-4 sm:mt-8 text-center space-y-6">
                                 <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-3xl shadow-sm border border-slate-200 dark:border-zinc-800 flex items-center justify-center bg-white dark:bg-zinc-900 text-4xl sm:text-5xl text-amber-500">
                                     <i className="fa-solid fa-bell-concierge"></i>
                                 </div>
@@ -357,40 +325,43 @@
                                     오늘 어떤 요리를 <br className="sm:hidden" />
                                     <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-500 to-orange-500">준비해볼까요?</span>
                                 </h2>
-                                <p className="text-slate-500 dark:text-zinc-400 max-w-md mx-auto text-sm sm:text-base">
-                                    신선한 식재료나 원하시는 메뉴를 입력해주세요.<br/>AI 셰프가 완벽한 레시피를 제안합니다.
-                                </p>
+                                
+                                <div className="flex flex-wrap justify-center gap-2 mt-2">
+                                    {["김치찌개", "파스타", "스테이크", "오므라이스"].map((tag, idx) => (
+                                        <button key={idx} type="button" onClick={() => handleSearch(tag)} className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 px-4 py-2 rounded-full text-sm font-semibold hover:border-amber-400 hover:text-amber-500 shadow-sm transition-all">
+                                            {tag}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                <div className="w-full max-w-2xl mx-auto mt-6">
+                                    <div className="relative group">
+                                        <div className="absolute inset-y-0 left-0 pl-6 flex items-center pointer-events-none">
+                                            <i className="fa-solid fa-magnifying-glass text-slate-400"></i>
+                                        </div>
+                                        <input
+                                            type="text"
+                                            value={query}
+                                            onChange={(e) => setQuery(e.target.value)}
+                                            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                                            placeholder="요리 이름을 검색하세요..."
+                                            className="w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-full py-4 sm:py-5 pl-14 pr-24 sm:pr-32 text-base sm:text-lg text-slate-900 dark:text-white shadow-sm focus:border-amber-400 outline-none"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => handleSearch()}
+                                            disabled={loading}
+                                            className="absolute right-2 top-2 bottom-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-full px-5 sm:px-8 font-bold text-sm sm:text-base disabled:opacity-50"
+                                        >
+                                            {loading ? <i className="fa-solid fa-circle-notch fa-spin"></i> : '검색'}
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         )}
 
-                        {/* Search Bar (Large) */}
-                        {(!recipe && !subCategoryData) ? (
-                            <div className="w-full max-w-2xl mx-auto mt-10">
-                                <div className="relative group">
-                                    <div className="absolute inset-y-0 left-0 pl-6 flex items-center pointer-events-none">
-                                        <i className="fa-solid fa-magnifying-glass text-slate-400 dark:text-zinc-500"></i>
-                                    </div>
-                                    <input
-                                        type="text"
-                                        value={query}
-                                        onChange={(e) => setQuery(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                                        placeholder="알리오 올리오, 김치볶음밥 검색..."
-                                        className="w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-full py-4 sm:py-5 pl-14 pr-32 text-base sm:text-lg text-slate-900 dark:text-white shadow-sm focus:border-amber-400 focus:ring-4 focus:ring-amber-500/10 outline-none transition-all"
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => handleSearch()}
-                                        disabled={loading}
-                                        className="absolute right-2 top-2 bottom-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-full px-6 sm:px-8 font-bold text-sm sm:text-base disabled:opacity-50 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
-                                    >
-                                        {loading ? <i className="fa-solid fa-circle-notch fa-spin"></i> : '검색'}
-                                    </button>
-                                </div>
-                            </div>
-                        ) : (
-                            /* Search Bar (Compact) */
-                            <div className="w-full max-w-5xl mb-10 flex gap-3">
+                        {(recipe || subCategoryData) && (
+                            <div className="w-full max-w-5xl mb-6 flex gap-3">
                                 <div className="relative flex-1">
                                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                                         <i className="fa-solid fa-magnifying-glass text-slate-400"></i>
@@ -400,51 +371,35 @@
                                         value={query}
                                         onChange={(e) => setQuery(e.target.value)}
                                         onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                                        placeholder="다른 레시피 검색하기..."
-                                        className="w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl py-3 pl-10 pr-4 text-slate-900 dark:text-white outline-none focus:border-amber-500 transition-all shadow-sm"
+                                        placeholder="다른 레시피 검색..."
+                                        className="w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl py-3 pl-10 pr-4 text-slate-900 dark:text-white outline-none focus:border-amber-500 shadow-sm"
                                     />
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={() => handleSearch()}
-                                    disabled={loading}
-                                    className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl px-6 font-bold text-sm disabled:opacity-50 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors shadow-sm"
-                                >
+                                <button type="button" onClick={() => handleSearch()} disabled={loading} className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl px-6 font-bold text-sm disabled:opacity-50">
                                     {loading ? <i className="fa-solid fa-circle-notch fa-spin"></i> : '검색'}
                                 </button>
                             </div>
                         )}
 
-                        {/* Error Message */}
-                        {error && (
-                            <div className="mt-6 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800/50 text-rose-700 dark:text-rose-400 p-4 rounded-xl text-center text-sm font-medium max-w-2xl mx-auto flex items-center justify-center gap-2">
-                                <i className="fa-solid fa-circle-exclamation"></i> 
-                                <span>{error}</span>
-                            </div>
-                        )}
-
-                        {/* Loading State */}
                         {loading && (
                             <div className="mt-20 text-center py-12 space-y-4">
                                 <i className="fa-solid fa-circle-notch fa-spin text-4xl text-amber-500"></i>
-                                <p className="text-slate-600 dark:text-zinc-400 font-medium text-sm">AI 셰프가 최적의 레시피를 구성하고 있습니다...</p>
+                                <p className="text-slate-600 dark:text-zinc-400 font-medium text-sm">AI 셰프가 데이터를 분석하고 있습니다...</p>
                             </div>
                         )}
 
-                        {/* Sub Categories (Options) */}
                         {subCategoryData && !loading && (
-                            <div className="mt-4">
-                                <div className="mb-8 border-b border-slate-200 dark:border-zinc-800 pb-4">
-                                    <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
-                                        추천하는 <span className="text-amber-500">'{subCategoryData.categoryName}'</span> 스타일입니다.
+                            <div className="mt-4 animate-slide-up">
+                                <div className="mb-6 border-b border-slate-200 dark:border-zinc-800 pb-4">
+                                    <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
+                                        추천하는 <span className="text-amber-500">'{subCategoryData.categoryName}'</span> 스타일
                                     </h2>
-                                    <p className="text-sm text-slate-500 dark:text-zinc-400 mt-2">원하시는 레시피를 선택하여 상세 조리 과정을 확인하세요.</p>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {subCategoryData.subCategories.map((sub, idx) => (
-                                        <div key={idx} onClick={() => executeFetchRecipe(sub.name)} className="group bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 p-6 rounded-2xl hover:border-amber-400 dark:hover:border-amber-500 hover:shadow-md cursor-pointer transition-all flex justify-between items-center">
+                                    {(subCategoryData.subCategories || []).map((sub, idx) => (
+                                        <div key={idx} onClick={() => executeFetchRecipe(sub.name)} className="group bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 p-6 rounded-2xl hover:border-amber-400 cursor-pointer transition-all flex justify-between items-center shadow-sm">
                                             <div>
-                                                <h3 className="text-lg font-bold text-slate-900 dark:text-white group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">{sub.name}</h3>
+                                                <h3 className="text-lg font-bold text-slate-900 dark:text-white group-hover:text-amber-600">{sub.name}</h3>
                                                 <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1">{sub.desc}</p>
                                             </div>
                                             <i className="fa-solid fa-arrow-right text-slate-300 dark:text-zinc-600 group-hover:text-amber-500 group-hover:translate-x-1 transition-all"></i>
@@ -454,31 +409,13 @@
                             </div>
                         )}
 
-                        {/* Recipe Detail */}
                         {recipe && !loading && (
-                            <div className="space-y-8">
-                                <div className="relative w-full h-[35vh] sm:h-[45vh] rounded-3xl overflow-hidden shadow-md border border-slate-200 dark:border-zinc-800 isolate bg-slate-100 dark:bg-zinc-900 flex items-center justify-center">
-                                    {/* Fallback Icon if image fails/isn't real */}
-                                    <i className="absolute fa-solid fa-image text-slate-300 dark:text-zinc-800 text-6xl"></i>
-                                    <img
-                                        src={`https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=1600&q=80`}
-                                        alt={recipe.title}
-                                        className="absolute inset-0 w-full h-full object-cover z-10"
-                                        onError={(e) => { e.target.style.display = 'none'; }}
-                                    />
-                                    <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/30 to-transparent z-20"></div>
-                                    <div className="absolute inset-0 p-6 sm:p-10 flex flex-col justify-between z-30">
-                                        <div className="flex justify-between items-start">
-                                            <span className="bg-amber-500 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-sm">Chef's Choice</span>
-                                            <button type="button" onClick={handleLikeToggle} className="bg-white/20 hover:bg-white/30 backdrop-blur-md border border-white/30 text-white px-4 py-2.5 rounded-full flex items-center gap-2 text-sm font-bold transition-all">
-                                                <i className={`${currentLikeData.liked ? 'fa-solid text-rose-500' : 'fa-regular'} fa-heart`}></i>
-                                                <span>{currentLikeData.count}</span>
-                                            </button>
-                                        </div>
-                                        <div>
-                                            <h2 className="text-3xl sm:text-5xl font-extrabold text-white tracking-tight">{recipe.title}</h2>
-                                            <p className="text-slate-200 mt-3 text-sm sm:text-base font-medium max-w-2xl leading-relaxed">{recipe.description}</p>
-                                        </div>
+                            <div className="space-y-8 animate-fade-in">
+                                <div className="relative w-full h-[30vh] sm:h-[40vh] rounded-3xl overflow-hidden shadow-md border border-slate-200 dark:border-zinc-800 bg-slate-800 flex items-center justify-center">
+                                    <img src={`https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=1600&q=80`} className="absolute inset-0 w-full h-full object-cover opacity-60" onError={(e) => e.target.style.display = 'none'} />
+                                    <div className="absolute inset-0 p-6 sm:p-10 flex flex-col justify-end z-30">
+                                        <h2 className="text-3xl sm:text-5xl font-extrabold text-white tracking-tight">{recipe.title}</h2>
+                                        <p className="text-slate-200 mt-2 text-sm sm:text-base font-medium max-w-2xl">{recipe.description}</p>
                                     </div>
                                 </div>
 
@@ -491,78 +428,48 @@
                                         { label: '칼로리', value: recipe.calories, icon: 'fa-bolt' },
                                         { label: '예상 비용', value: recipe.estimatedCost, icon: 'fa-won-sign' },
                                     ].map((stat, idx) => (
-                                        <div key={idx} className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 p-4 sm:p-5 rounded-2xl flex flex-col items-center text-center shadow-sm">
-                                            <i className={`fa-solid ${stat.icon} text-slate-400 dark:text-zinc-500 mb-2`}></i>
-                                            <div className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">{stat.label}</div>
+                                        <div key={idx} className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 p-4 rounded-2xl flex flex-col items-center text-center shadow-sm">
+                                            <i className={`fa-solid ${stat.icon} text-slate-400 dark:text-zinc-500 mb-1`}></i>
+                                            <div className="text-[10px] font-semibold text-slate-500 uppercase">{stat.label}</div>
                                             <div className="font-bold text-slate-900 dark:text-white mt-1 text-sm">{stat.value}</div>
                                         </div>
                                     ))}
                                 </div>
 
-                                <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 p-6 sm:p-8 rounded-3xl shadow-sm">
-                                    <div className="flex justify-between items-end mb-4">
-                                        <div>
-                                            <h3 className="text-base font-bold text-slate-900 dark:text-white">진행 상황</h3>
-                                            <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1">{completedCount} / {totalSteps} 단계 완료</p>
-                                        </div>
-                                        <span className="text-2xl font-extrabold text-amber-500">{progressPercent}%</span>
-                                    </div>
-                                    <div className="w-full bg-slate-100 dark:bg-zinc-800 h-2.5 rounded-full overflow-hidden">
-                                        <div className="bg-amber-500 h-full transition-all duration-500 ease-out" style={{ width: `${progressPercent}%` }}></div>
-                                    </div>
-                                </div>
-
                                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                                     <div className="lg:col-span-1 space-y-4">
-                                        <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2 border-b border-slate-200 dark:border-zinc-800 pb-3">
-                                            <i className="fa-solid fa-basket-shopping text-slate-400"></i> 재료 준비
-                                        </h3>
+                                        <h3 className="text-lg font-bold text-slate-900 dark:text-white border-b border-slate-200 dark:border-zinc-800 pb-2">재료 준비</h3>
                                         <ul className="space-y-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 p-5 rounded-2xl shadow-sm">
                                             {(recipe.ingredients || []).map((ing, idx) => (
-                                                <li key={idx} className="flex justify-between items-center py-2.5 border-b border-slate-100 dark:border-zinc-800/50 last:border-0 text-sm">
+                                                <li key={idx} className="flex justify-between items-center py-2 border-b border-slate-100 dark:border-zinc-800/50 last:border-0 text-sm">
                                                     <span className="text-slate-800 dark:text-zinc-200 font-medium">{ing.split(' (')[0]}</span>
-                                                    <span className="text-slate-500 dark:text-zinc-400 text-xs bg-slate-50 dark:bg-zinc-800 px-2 py-1 rounded-md">{ing.includes('(') ? ing.split('(')[1].replace(')', '') : ''}</span>
+                                                    <span className="text-xs text-slate-500">{ing.includes('(') ? ing.split('(')[1].replace(')', '') : ''}</span>
                                                 </li>
                                             ))}
                                         </ul>
                                     </div>
 
                                     <div className="lg:col-span-2 space-y-4">
-                                        <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2 border-b border-slate-200 dark:border-zinc-800 pb-3">
-                                            <i className="fa-solid fa-list-check text-slate-400"></i> 조리 순서
-                                        </h3>
+                                        <h3 className="text-lg font-bold text-slate-900 dark:text-white border-b border-slate-200 dark:border-zinc-800 pb-2">조리 순서</h3>
                                         <div className="relative border-l-2 border-slate-100 dark:border-zinc-800 ml-4 space-y-6 pb-4 pt-2">
                                             {(recipe.steps || []).map((step, idx) => {
                                                 const isChecked = checkedSteps[idx];
                                                 return (
-                                                    <div key={idx} className="relative pl-8 sm:pl-10">
+                                                    <div key={idx} className="relative pl-8">
                                                         <button
                                                             type="button"
-                                                            onClick={() => toggleCheckStep(idx)}
-                                                            className={`absolute -left-[17px] sm:-left-[19px] top-0 w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-sm font-bold transition-all border-4 border-slate-50 dark:border-zinc-950 ${isChecked ? 'bg-amber-500 text-white border-amber-100 dark:border-amber-900/30' : 'bg-white dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 shadow-sm'}`}
+                                                            onClick={() => {
+                                                                const updated = { ...checkedSteps, [idx]: !checkedSteps[idx] };
+                                                                setCheckedSteps(updated);
+                                                            }}
+                                                            className={`absolute -left-[17px] top-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border-4 border-slate-50 dark:border-zinc-950 ${isChecked ? 'bg-amber-500 text-white' : 'bg-white dark:bg-zinc-800 text-slate-500'}`}
                                                         >
                                                             {isChecked ? <i className="fa-solid fa-check"></i> : (idx + 1)}
                                                         </button>
-                                                        
-                                                        <div className={`transition-all duration-300 bg-white dark:bg-zinc-900 border ${isChecked ? 'border-amber-200 dark:border-amber-900/50 shadow-sm' : 'border-slate-200 dark:border-zinc-800'} p-5 sm:p-6 rounded-2xl`}>
-                                                            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 mb-3">
-                                                                <h4 className={`text-base font-medium leading-relaxed ${isChecked ? 'text-slate-400 dark:text-zinc-500 line-through' : 'text-slate-800 dark:text-zinc-100'}`}>
-                                                                    {step.instruction}
-                                                                </h4>
-                                                                <span className="text-xs font-semibold px-2.5 py-1 bg-slate-50 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 rounded-md shrink-0 self-start whitespace-nowrap border border-slate-100 dark:border-zinc-700">
-                                                                    <i className="fa-regular fa-clock mr-1"></i>{step.duration}
-                                                                </span>
-                                                            </div>
-                                                            <div className="mt-3 bg-slate-50 dark:bg-zinc-950/50 p-3 rounded-xl border border-slate-100 dark:border-zinc-800/50 flex items-center gap-2">
-                                                                <i className="fa-solid fa-pen text-slate-300 dark:text-zinc-600 text-xs"></i>
-                                                                <input
-                                                                    type="text"
-                                                                    value={stepNotes[idx] || ''}
-                                                                    onChange={(e) => handleNoteChange(idx, e.target.value)}
-                                                                    placeholder="개인적인 메모나 팁을 남겨보세요."
-                                                                    className="w-full text-sm bg-transparent text-slate-700 dark:text-zinc-300 placeholder-slate-400 dark:placeholder-zinc-600 outline-none"
-                                                                />
-                                                            </div>
+                                                        <div className={`transition-all bg-white dark:bg-zinc-900 border ${isChecked ? 'border-amber-200 dark:border-amber-900/50' : 'border-slate-200 dark:border-zinc-800'} p-5 rounded-2xl`}>
+                                                            <h4 className={`text-base font-medium ${isChecked ? 'text-slate-400 line-through' : 'text-slate-800 dark:text-zinc-100'}`}>
+                                                                {step.instruction}
+                                                            </h4>
                                                         </div>
                                                     </div>
                                                 );
@@ -573,18 +480,16 @@
                             </div>
                         )}
 
-                        {/* Recent Searches */}
                         {!recipe && !subCategoryData && (recentSearches || []).length > 0 && (
-                            <div className="mt-12 w-full max-w-2xl mx-auto border-t border-slate-200 dark:border-zinc-800 pt-8">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h3 className="text-sm font-semibold text-slate-500 dark:text-zinc-400">최근 검색 기록</h3>
-                                    <button type="button" onClick={clearAllRecentSearches} className="text-xs font-medium text-slate-400 hover:text-slate-700 dark:text-zinc-500 dark:hover:text-zinc-300 transition-colors">전체 삭제</button>
+                            <div className="mt-12 w-full max-w-2xl mx-auto border-t border-slate-200 dark:border-zinc-800 pt-6">
+                                <div className="flex justify-between items-center mb-3">
+                                    <h3 className="text-sm font-semibold text-slate-500">최근 검색 기록</h3>
+                                    <button type="button" onClick={() => { setRecentSearches([]); removeSafeStorage('recent_recipe_searches'); }} className="text-xs text-slate-400">전체 삭제</button>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
                                     {(recentSearches || []).map((term, index) => (
-                                        <div key={index} className="group flex items-center gap-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 px-4 py-2 rounded-full text-sm font-medium text-slate-700 dark:text-zinc-300 cursor-pointer hover:border-slate-300 dark:hover:border-zinc-600 transition-colors shadow-sm">
-                                            <span onClick={() => { setQuery(term); handleSearch(term); }}>{term}</span>
-                                            <i className="fa-solid fa-xmark text-slate-300 dark:text-zinc-600 hover:text-rose-500 dark:hover:text-rose-400" onClick={(e) => removeRecentSearch(e, term)}></i>
+                                        <div key={index} onClick={() => handleSearch(term)} className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 px-3 py-1.5 rounded-full text-sm text-slate-600 dark:text-zinc-300 cursor-pointer shadow-sm">
+                                            {term}
                                         </div>
                                     ))}
                                 </div>
@@ -592,80 +497,23 @@
                         )}
                     </main>
 
-                    {/* Modals (Stats) */}
-                    {showStatsModal && (
-                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 dark:bg-black/60 backdrop-blur-sm">
-                            <div className="bg-white dark:bg-zinc-900 rounded-[2rem] max-w-sm w-full p-8 shadow-2xl border border-slate-100 dark:border-zinc-800">
-                                <div className="flex justify-between items-center mb-8">
-                                    <h3 className="text-xl font-bold text-slate-900 dark:text-white">요리 통계</h3>
-                                    <button type="button" onClick={() => setShowStatsModal(false)} className="w-8 h-8 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-500 dark:text-zinc-400 hover:bg-slate-200 dark:hover:bg-zinc-700 transition-colors"><i className="fa-solid fa-xmark"></i></button>
+                    {showSettingsModal && (
+                        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+                            <div className="bg-white dark:bg-zinc-900 rounded-3xl max-w-md w-full p-8 shadow-2xl">
+                                <div className="flex justify-between items-center mb-6">
+                                    <h3 className="text-xl font-bold text-slate-900 dark:text-white">시스템 설정</h3>
+                                    <button type="button" onClick={() => setShowSettingsModal(false)} className="w-8 h-8 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center"><i className="fa-solid fa-xmark"></i></button>
                                 </div>
-                                <div className="space-y-5">
-                                    <div className="bg-slate-50 dark:bg-zinc-800/50 p-5 rounded-2xl border border-slate-100 dark:border-zinc-800">
-                                        <div className="text-xs font-semibold text-slate-500 dark:text-zinc-400 mb-1">총 요리 완성 횟수</div>
-                                        <div className="text-3xl font-extrabold text-slate-900 dark:text-white">{totalCookCount}<span className="text-base font-medium text-slate-500 ml-1">회</span></div>
-                                    </div>
-                                    <div className="pt-2">
-                                        <h4 className="text-sm font-semibold text-slate-900 dark:text-white mb-4">가장 많이 찾은 레시피</h4>
-                                        <div className="space-y-4">
-                                            {chartData.length === 0 ? (
-                                                <p className="text-sm text-slate-400 text-center py-4">아직 기록이 없습니다.</p>
-                                            ) : (
-                                                chartData.map(([dish, count], index) => {
-                                                    const barPercentage = Math.max(Math.round((count / maxChartCount) * 100), 10);
-                                                    return (
-                                                        <div key={index} className="space-y-2">
-                                                            <div className="flex justify-between text-sm font-medium text-slate-700 dark:text-zinc-300">
-                                                                <span className="truncate pr-2">{dish}</span><span className="text-slate-900 dark:text-white font-bold">{count}회</span>
-                                                            </div>
-                                                            <div className="w-full bg-slate-100 dark:bg-zinc-800 h-2 rounded-full overflow-hidden">
-                                                                <div className="bg-slate-800 dark:bg-slate-200 h-full rounded-full" style={{ width: `${barPercentage}%` }}></div>
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })
-                                            )}
-                                        </div>
-                                    </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 dark:text-zinc-300 mb-2">Gemini API 키</label>
+                                    <input 
+                                        type="text" value={tempApiKey} onChange={(e) => setTempApiKey(e.target.value)}
+                                        placeholder="AIzaSy..."
+                                        className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                                    />
+                                    <p className="text-xs text-slate-500 mt-2">정상적인 API 통신을 위해 'AIza'로 시작하는 키가 필요합니다. 오류 시 자동으로 데모 데이터가 반환됩니다.</p>
+                                    <button type="button" onClick={saveApiKey} className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold py-3.5 rounded-xl mt-5 transition-colors">저장하기</button>
                                 </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Modals (History) */}
-                    {showHistoryModal && (
-                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 dark:bg-black/60 backdrop-blur-sm">
-                            <div className="bg-white dark:bg-zinc-900 rounded-[2rem] max-w-lg w-full p-6 shadow-2xl flex flex-col max-h-[85vh] border border-slate-100 dark:border-zinc-800">
-                                <div className="flex justify-between items-center mb-6 px-2">
-                                    <h3 className="text-xl font-bold text-slate-900 dark:text-white">요리 보관함</h3>
-                                    <button type="button" onClick={() => setShowHistoryModal(false)} className="w-8 h-8 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-500 dark:text-zinc-400 hover:bg-slate-200 dark:hover:bg-zinc-700 transition-colors"><i className="fa-solid fa-xmark"></i></button>
-                                </div>
-                                <div className="flex-1 overflow-y-auto space-y-3 px-2">
-                                    {safeHistory.length === 0 ? (
-                                        <div className="flex flex-col items-center justify-center py-12">
-                                            <i className="fa-solid fa-book-open text-4xl text-slate-200 dark:text-zinc-700 mb-4"></i>
-                                            <p className="text-slate-500 dark:text-zinc-400 text-sm">요리를 완료하면 이곳에 기록이 저장됩니다.</p>
-                                        </div>
-                                    ) : (
-                                        safeHistory.map((item, idx) => (
-                                            <div key={idx} className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 p-4 rounded-2xl flex justify-between items-center shadow-sm">
-                                                <div>
-                                                    <h4 className="font-bold text-slate-900 dark:text-white text-base">{item.title}</h4>
-                                                    <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1.5 font-medium flex items-center gap-2">
-                                                        <span><i className="fa-regular fa-calendar mr-1"></i>{item.date}</span>
-                                                        <span className="w-1 h-1 rounded-full bg-slate-300 dark:bg-zinc-600"></span>
-                                                        <span><i className="fa-solid fa-fire mr-1 text-slate-400"></i>{item.calories}</span>
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        ))
-                                    )}
-                                </div>
-                                {safeHistory.length > 0 && (
-                                    <div className="mt-4 pt-4 border-t border-slate-100 dark:border-zinc-800 text-center">
-                                        <button type="button" onClick={clearHistory} className="text-sm font-medium text-slate-400 hover:text-rose-500 dark:text-zinc-500 dark:hover:text-rose-400 transition-colors px-4 py-2">전체 기록 삭제</button>
-                                    </div>
-                                )}
                             </div>
                         </div>
                     )}
