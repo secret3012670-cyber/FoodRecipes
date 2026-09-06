@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>네온 테트리스</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600;800&family=Share+Tech+Mono&display=swap');
+    
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      height: 100%;
+      height: 100dvh;
+      overflow: hidden; /* 스크롤 완전 방지 */
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .font-mono-tech {
+      font-family: 'Share Tech Mono', monospace;
+    }
+
+    /* 반응형 캔버스: 가로세로 비율(1:2)을 유지하면서 부모 높이/너비에 자동 맞춤 */
+    #board-canvas {
+      aspect-ratio: 1 / 2;
+      max-height: 100%;
+      max-width: 100%;
+      object-fit: contain;
+      box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+    }
+
+    /* 터치 버튼 햅틱 피드백 */
+    .touch-btn:active {
+      transform: scale(0.93);
+      filter: brightness(1.25);
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 flex flex-col items-center justify-between p-1.5 sm:p-3 select-none">
+
+  <!-- 1. 상단 컴팩트 헤더 -->
+  <header class="w-full max-w-sm sm:max-w-md flex justify-between items-center py-1.5 px-3 bg-slate-900/90 backdrop-blur rounded-xl border border-slate-800 shadow-md shrink-0">
+    <div class="flex items-center gap-2">
+      <div class="w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center font-black text-xs sm:text-sm shadow-md shadow-cyan-500/30">
+        T
+      </div>
+      <h1 class="text-sm sm:text-base font-extrabold tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 via-indigo-300 to-purple-400">
+        TETRIS
+      </h1>
+    </div>
+    
+    <div class="flex items-center gap-1.5">
+      <button id="sound-btn" class="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-slate-300 transition-colors" title="효과음">
+        🔊
+      </button>
+      <button id="pause-btn" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[11px] font-semibold text-slate-300 transition-colors">
+        일시정지
+      </button>
+      <button id="restart-btn" class="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-[11px] font-semibold text-white shadow shadow-indigo-600/30 transition-all">
+        난이도
+      </button>
+    </div>
+  </header>
+
+  <!-- 2. 중앙 게임 메인 보드 컨테이너 (남은 화면 높이에 꽉 차게 반응형 맞춤) -->
+  <main class="w-full max-w-sm sm:max-w-md flex-1 min-h-0 flex items-center justify-center gap-1.5 sm:gap-3 py-1 overflow-hidden">
+    
+    <!-- [좌측 패널] 홀드 & 스탯 정보 -->
+    <div class="flex flex-col gap-1.5 w-16 sm:w-20 shrink-0 h-full max-h-[460px] justify-between py-0.5">
+      <!-- HOLD 카드 -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-1.5 flex flex-col items-center shadow-sm">
+        <span class="text-[9px] sm:text-[10px] font-bold text-slate-400 tracking-wide">HOLD</span>
+        <canvas id="hold-canvas" width="60" height="60" class="w-full aspect-square rounded mt-0.5 bg-slate-950/60"></canvas>
+      </div>
+
+      <!-- 정보 표시 패널 -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-1.5 sm:p-2 flex flex-col gap-1 sm:gap-1.5 shadow-sm text-center">
+        <div>
+          <div class="text-[8px] sm:text-[9px] text-slate-400 font-semibold">난이도</div>
+          <div id="diff-badge" class="text-[10px] sm:text-xs font-black text-cyan-400 truncate leading-tight">보통</div>
+        </div>
+        <div>
+          <div class="text-[8px] sm:text-[9px] text-slate-400 font-semibold">SCORE</div>
+          <div id="score-display" class="font-mono-tech text-xs sm:text-sm font-bold text-amber-400 truncate">0</div>
+        </div>
+        <div>
+          <div class="text-[8px] sm:text-[9px] text-slate-400 font-semibold">LINES</div>
+          <div id="lines-display" class="font-mono-tech text-[10px] sm:text-xs font-bold text-emerald-400">0</div>
+        </div>
+        <div>
+          <div class="text-[8px] sm:text-[9px] text-slate-400 font-semibold">LEVEL</div>
+          <div id="level-display" class="font-mono-tech text-[10px] sm:text-xs font-bold text-fuchsia-400">1</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- [중앙 테트리스 캔버스 영역] -->
+    <div class="relative h-full flex items-center justify-center min-w-0 max-w-full flex-1">
+      <div class="h-full max-h-[460px] p-1 rounded-2xl bg-gradient-to-b from-indigo-500/20 via-slate-800/40 to-cyan-500/20 border border-slate-700/80 backdrop-blur flex items-center justify-center shadow-lg">
+        <canvas id="board-canvas" width="240" height="480" class="bg-slate-950 rounded-xl block"></canvas>
+      </div>
+
+      <!-- 일시정지 안내 오버레이 -->
+      <div id="pause-overlay" class="absolute inset-0 bg-slate-950/85 backdrop-blur-sm rounded-2xl hidden flex-col items-center justify-center gap-2.5 z-10 border border-indigo-500/30">
+        <span class="text-base sm:text-lg font-black tracking-widest text-indigo-400 animate-pulse">PAUSED</span>
+        <button id="resume-btn" class="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md shadow-indigo-600/40">
+          계속하기
+        </button>
+      </div>
+    </div>
+
+    <!-- [우측 패널] NEXT 블록 & 조작 키 가이드 -->
+    <div class="flex flex-col gap-1.5 w-16 sm:w-20 shrink-0 h-full max-h-[460px] justify-between py-0.5">
+      <!-- NEXT 카드 -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-1.5 flex flex-col items-center shadow-sm">
+        <span class="text-[9px] sm:text-[10px] font-bold text-slate-400 tracking-wide">NEXT</span>
+        <canvas id="next-canvas" width="60" height="150" class="w-full aspect-[2/5] rounded mt-0.5 bg-slate-950/60"></canvas>
+      </div>
+
+      <!-- PC 키보드 단축키 안내 팁 (화면이 작을 땐 자동 생략) -->
+      <div class="bg-slate-900/60 border border-slate-800/60 rounded-xl p-1.5 text-[8px] sm:text-[9px] text-slate-400 hidden sm:flex flex-col gap-0.5 text-center">
+        <div><b class="text-slate-300">Space</b> 낙하</div>
+        <div><b class="text-slate-300">↑/X</b> 회전</div>
+        <div><b class="text-slate-300">C</b> 홀드</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- 3. 하단 모바일 컨트롤 패드 (컴팩트 슬림 디자인으로 화면 침범 최소화) -->
+  <footer class="w-full max-w-sm sm:max-w-md shrink-0 flex flex-col gap-1 pt-0.5 pb-1 sm:hidden">
+    <!-- 기능 버튼 행 -->
+    <div class="grid grid-cols-4 gap-1.5 px-1">
+      <button id="btn-hold" class="touch-btn py-2 bg-slate-800 border border-slate-700 rounded-xl text-[11px] font-bold text-indigo-300 active:bg-indigo-900 shadow">
+        HOLD
+      </button>
+      <button id="btn-rot-ccw" class="touch-btn py-2 bg-slate-800 border border-slate-700 rounded-xl text-[11px] font-bold text-cyan-300 active:bg-cyan-900 shadow">
+        ↺ 좌회전
+      </button>
+      <button id="btn-rot-cw" class="touch-btn py-2 bg-slate-800 border border-slate-700 rounded-xl text-[11px] font-bold text-cyan-300 active:bg-cyan-900 shadow">
+        ↻ 우회전
+      </button>
+      <button id="btn-hard-drop" class="touch-btn py-2 bg-rose-900/90 border border-rose-700 rounded-xl text-[11px] font-black text-rose-200 active:bg-rose-800 shadow">
+        ⚡ DROP
+      </button>
+    </div>
+
+    <!-- 방향키 행 -->
+    <div class="grid grid-cols-3 gap-1.5 px-3">
+      <button id="btn-left" class="touch-btn py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl flex items-center justify-center text-lg text-slate-200 active:bg-slate-700 shadow">
+        ◀
+      </button>
+      <button id="btn-down" class="touch-btn py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl flex items-center justify-center text-lg text-slate-200 active:bg-slate-700 shadow">
+        ▼
+      </button>
+      <button id="btn-right" class="touch-btn py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl flex items-center justify-center text-lg text-slate-200 active:bg-slate-700 shadow">
+        ▶
+      </button>
+    </div>
+  </footer>
+
+  <!-- 난이도 선택 팝업 모달 -->
+  <div id="difficulty-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 z-50">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 w-full max-w-xs flex flex-col gap-3 shadow-2xl">
+      <div class="text-center">
+        <h2 class="text-lg sm:text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-indigo-400 to-fuchsia-400">
+          난이도 선택
+        </h2>
+        <p class="text-[11px] text-slate-400 mt-0.5">도전할 게임 속도를 선택하세요</p>
+      </div>
+
+      <div class="flex flex-col gap-2">
+        <button class="diff-select-btn p-2.5 rounded-xl border border-emerald-500/30 bg-emerald-950/20 hover:bg-emerald-900/40 text-left transition-all flex items-center justify-between" data-diff="easy">
+          <div>
+            <div class="text-emerald-400 font-bold text-xs">🌱 쉬움 (Easy)</div>
+            <div class="text-[10px] text-slate-400">느긋한 기본 속도 (입문자용)</div>
+          </div>
+          <span class="text-[11px] text-emerald-400 font-mono font-bold">1.0x</span>
+        </button>
+
+        <button class="diff-select-btn p-2.5 rounded-xl border border-cyan-500/30 bg-cyan-950/20 hover:bg-cyan-900/40 text-left transition-all flex items-center justify-between" data-diff="normal">
+          <div>
+            <div class="text-cyan-400 font-bold text-xs">🚀 보통 (Normal)</div>
+            <div class="text-[10px] text-slate-400">정통 표준 아케이드 속도</div>
+          </div>
+          <span class="text-[11px] text-cyan-400 font-mono font-bold">1.5x</span>
+        </button>
+
+        <button class="diff-select-btn p-2.5 rounded-xl border border-amber-500/30 bg-amber-950/20 hover:bg-amber-900/40 text-left transition-all flex items-center justify-between" data-diff="hard">
+          <div>
+            <div class="text-amber-400 font-bold text-xs">🔥 어려움 (Hard)</div>
+            <div class="text-[10px] text-slate-400">빠른 낙하 + 3줄 방해 블록</div>
+          </div>
+          <span class="text-[11px] text-amber-400 font-mono font-bold">2.2x</span>
+        </button>
+
+        <button class="diff-select-btn p-2.5 rounded-xl border border-rose-500/30 bg-rose-950/20 hover:bg-rose-900/40 text-left transition-all flex items-center justify-between" data-diff="master">
+          <div>
+            <div class="text-rose-400 font-bold text-xs">⚡ 마스터 (Master)</div>
+            <div class="text-[10px] text-slate-400">초고속 낙하 + 5줄 방해 블록</div>
+          </div>
+          <span class="text-[11px] text-rose-400 font-mono font-bold">3.5x</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 게임 오버 팝업 모달 -->
+  <div id="gameover-modal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 z-50 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 w-full max-w-xs flex flex-col items-center gap-3 text-center shadow-2xl">
+      <div class="w-12 h-12 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-2xl">
+        💀
+      </div>
+      <div>
+        <h3 class="text-lg sm:text-xl font-black text-rose-400 tracking-wider">GAME OVER</h3>
+        <p class="text-[11px] text-slate-400">블록이 맨 위까지 쌓였습니다.</p>
+      </div>
+
+      <div class="w-full bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 flex flex-col gap-1.5 text-xs">
+        <div class="flex justify-between items-center">
+          <span class="text-slate-400">도전 난이도</span>
+          <span id="final-diff" class="font-bold text-cyan-400">보통</span>
+        </div>
+        <div class="flex justify-between items-center">
+          <span class="text-slate-400">최종 점수</span>
+          <span id="final-score" class="font-mono-tech text-base font-bold text-amber-400">0</span>
+        </div>
+        <div class="flex justify-between items-center">
+          <span class="text-slate-400">제거한 라인</span>
+          <span id="final-lines" class="font-mono-tech font-bold text-emerald-400">0 줄</span>
+        </div>
+      </div>
+
+      <div class="flex w-full gap-2 mt-1">
+        <button id="retry-btn" class="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs shadow-md shadow-indigo-600/30 transition-all">
+          다시 시작
+        </button>
+        <button id="change-diff-btn" class="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl border border-slate-700 text-xs">
+          난이도 변경
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ==========================================================================
+       1. 사운드 시스템 (Web Audio API)
+       ========================================================================== */
+    class SoundEngine {
+      constructor() {
+        this.ctx = null;
+        this.muted = false;
+      }
+
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          this.ctx = new AudioContext();
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+
+      playTone(freq, type = 'sine', duration = 0.08, vol = 0.12) {
+        if (this.muted) return;
+        this.init();
+        try {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = type;
+          osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+          gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start();
+          osc.stop(this.ctx.currentTime + duration);
+        } catch (e) {}
+      }
+
+      move() { this.playTone(320, 'sine', 0.03, 0.06); }
+      rotate() { this.playTone(480, 'triangle', 0.05, 0.08); }
+      drop() { this.playTone(180, 'sine', 0.05, 0.1); }
+      hardDrop() { this.playTone(120, 'square', 0.08, 0.15); }
+      hold() { this.playTone(600, 'sine', 0.06, 0.08); }
+
+      clearLines(count) {
+        if (this.muted) return;
+        const freqs = count === 4 
+          ? [523.25, 659.25, 783.99, 1046.50]
+          : [440, 554.37, 659.25].slice(0, count + 1);
+        freqs.forEach((f, i) => {
+          setTimeout(() => this.playTone(f, 'square', 0.1, 0.15), i * 65);
+        });
+      }
+
+      gameOver() {
+        if (this.muted) return;
+        [280, 240, 200, 150].forEach((f, i) => {
+          setTimeout(() => this.playTone(f, 'sawtooth', 0.14, 0.18), i * 100);
+        });
+      }
+    }
+
+    const sound = new SoundEngine();
+
+    /* ==========================================================================
+       2. 테트리스 게임 코어 및 테트로미노 데이터
+       ========================================================================== */
+    const COLS = 10;
+    const ROWS = 20;
+    const BLOCK_SIZE = 24; // 캔버스 내부 좌표계 (240x480)
+
+    const TETROMINOES = {
+      I: { shape: [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]], color: '#06b6d4' },
+      J: { shape: [[1,0,0],[1,1,1],[0,0,0]], color: '#3b82f6' },
+      L: { shape: [[0,0,1],[1,1,1],[0,0,0]], color: '#f97316' },
+      O: { shape: [[1,1],[1,1]], color: '#eab308' },
+      S: { shape: [[0,1,1],[1,1,0],[0,0,0]], color: '#22c55e' },
+      T: { shape: [[0,1,0],[1,1,1],[0,0,0]], color: '#a855f7' },
+      Z: { shape: [[1,1,0],[0,1,1],[0,0,0]], color: '#ef4444' },
+      G: { shape: [], color: '#64748b' } // 방해 블록
+    };
+
+    const DIFFICULTY_SETTINGS = {
+      easy: {
+        label: '쉬움 (Easy)',
+        badgeClass: 'text-emerald-400',
+        initialDropInterval: 850,
+        speedDecrementPerLevel: 45,
+        minDropInterval: 180,
+        garbageLines: 0,
+        scoreMultiplier: 1.0
+      },
+      normal: {
+        label: '보통 (Normal)',
+        badgeClass: 'text-cyan-400',
+        initialDropInterval: 600,
+        speedDecrementPerLevel: 50,
+        minDropInterval: 120,
+        garbageLines: 0,
+        scoreMultiplier: 1.5
+      },
+      hard: {
+        label: '어려움 (Hard)',
+        badgeClass: 'text-amber-400',
+        initialDropInterval: 340,
+        speedDecrementPerLevel: 35,
+        minDropInterval: 80,
+        garbageLines: 3,
+        scoreMultiplier: 2.2
+      },
+      master: {
+        label: '마스터 (Master)',
+        badgeClass: 'text-rose-400',
+        initialDropInterval: 160,
+        speedDecrementPerLevel: 20,
+        minDropInterval: 45,
+        garbageLines: 5,
+        scoreMultiplier: 3.5
+      }
+    };
+
+    /* ==========================================================================
+       3. 캔버스 및 게임 변수 초기화
+       ========================================================================== */
+    const boardCanvas = document.getElementById('board-canvas');
+    const boardCtx = boardCanvas.getContext('2d');
+    const holdCanvas = document.getElementById('hold-canvas');
+    const holdCtx = holdCanvas.getContext('2d');
+    const nextCanvas = document.getElementById('next-canvas');
+    const nextCtx = nextCanvas.getContext('2d');
+
+    const scoreDisplay = document.getElementById('score-display');
+    const linesDisplay = document.getElementById('lines-display');
+    const levelDisplay = document.getElementById('level-display');
+    const diffBadge = document.getElementById('diff-badge');
+    const pauseOverlay = document.getElementById('pause-overlay');
+    const diffModal = document.getElementById('difficulty-modal');
+    const gameOverModal = document.getElementById('gameover-modal');
+
+    let board = [];
+    let currentPiece = null;
+    let nextQueue = [];
+    let holdPieceType = null;
+    let canHold = true;
+
+    let score = 0;
+    let lines = 0;
+    let level = 1;
+    let currentDifficulty = 'normal';
+    let isGameOver = false;
+    let isPaused = false;
+
+    let dropCounter = 0;
+    let dropInterval = 600;
+    let lastTime = 0;
+    let animationFrameId = null;
+
+    let bag = [];
+    function refillBag() {
+      const types = ['I', 'J', 'L', 'O', 'S', 'T', 'Z'];
+      for (let i = types.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [types[i], types[j]] = [types[j], types[i]];
+      }
+      return types;
+    }
+
+    function getNextPieceType() {
+      if (bag.length === 0) {
+        bag = refillBag();
+      }
+      return bag.pop();
+    }
+
+    function createPiece(type) {
+      return {
+        type: type,
+        matrix: TETROMINOES[type].shape.map(row => [...row]),
+        x: Math.floor(COLS / 2) - Math.ceil(TETROMINOES[type].shape[0].length / 2),
+        y: 0
+      };
+    }
+
+    function resetBoard() {
+      board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+      const garbCount = DIFFICULTY_SETTINGS[currentDifficulty].garbageLines;
+      if (garbCount > 0) {
+        for (let r = ROWS - garbCount; r < ROWS; r++) {
+          const emptyHole = Math.floor(Math.random() * COLS);
+          for (let c = 0; c < COLS; c++) {
+            if (c !== emptyHole) {
+              board[r][c] = 'G';
+            }
+          }
+        }
+      }
+    }
+
+    function calculateDropInterval() {
+      const config = DIFFICULTY_SETTINGS[currentDifficulty];
+      const speed = config.initialDropInterval - (level - 1) * config.speedDecrementPerLevel;
+      return Math.max(config.minDropInterval, speed);
+    }
+
+    function startNewGame(difficultyKey) {
+      currentDifficulty = difficultyKey;
+      const config = DIFFICULTY_SETTINGS[currentDifficulty];
+
+      diffBadge.innerText = config.label.split(' ')[0];
+      diffBadge.className = `text-[10px] sm:text-xs font-black truncate leading-tight ${config.badgeClass}`;
+
+      score = 0;
+      lines = 0;
+      level = 1;
+      isGameOver = false;
+      isPaused = false;
+      dropInterval = calculateDropInterval();
+      dropCounter = 0;
+      holdPieceType = null;
+      canHold = true;
+      bag = [];
+
+      updateUI();
+      resetBoard();
+
+      nextQueue = [getNextPieceType(), getNextPieceType(), getNextPieceType()];
+      spawnPiece();
+
+      diffModal.classList.add('hidden');
+      gameOverModal.classList.add('hidden');
+      pauseOverlay.classList.add('hidden');
+
+      lastTime = performance.now();
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      animationFrameId = requestAnimationFrame(gameLoop);
+    }
+
+    function spawnPiece() {
+      const type = nextQueue.shift();
+      nextQueue.push(getNextPieceType());
+      currentPiece = createPiece(type);
+      canHold = true;
+
+      if (checkCollision(currentPiece.matrix, currentPiece.x, currentPiece.y)) {
+        handleGameOver();
+      }
+    }
+
+    function checkCollision(matrix, px, py) {
+      for (let r = 0; r < matrix.length; r++) {
+        for (let c = 0; c < matrix[r].length; c++) {
+          if (matrix[r][c] !== 0) {
+            const newX = px + c;
+            const newY = py + r;
+            if (newX < 0 || newX >= COLS || newY >= ROWS) return true;
+            if (newY >= 0 && board[newY][newX] !== 0) return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    function rotateMatrix(matrix, dir = 1) {
+      const N = matrix.length;
+      const result = Array.from({ length: N }, () => Array(N).fill(0));
+      for (let r = 0; r < N; r++) {
+        for (let c = 0; c < N; c++) {
+          if (dir === 1) {
+            result[c][N - 1 - r] = matrix[r][c];
+          } else {
+            result[N - 1 - c][r] = matrix[r][c];
+          }
+        }
+      }
+      return result;
+    }
+
+    function playerRotate(dir = 1) {
+      if (isPaused || isGameOver || !currentPiece) return;
+      sound.init();
+
+      const originalMatrix = currentPiece.matrix;
+      const rotated = rotateMatrix(originalMatrix, dir);
+      const kicks = [0, -1, 1, -2, 2];
+      for (let offset of kicks) {
+        if (!checkCollision(rotated, currentPiece.x + offset, currentPiece.y)) {
+          currentPiece.matrix = rotated;
+          currentPiece.x += offset;
+          sound.rotate();
+          return;
+        }
+      }
+    }
+
+    function playerMove(dir) {
+      if (isPaused || isGameOver || !currentPiece) return;
+      sound.init();
+
+      if (!checkCollision(currentPiece.matrix, currentPiece.x + dir, currentPiece.y)) {
+        currentPiece.x += dir;
+        sound.move();
+      }
+    }
+
+    function playerDrop() {
+      if (isPaused || isGameOver || !currentPiece) return;
+      sound.init();
+
+      if (!checkCollision(currentPiece.matrix, currentPiece.x, currentPiece.y + 1)) {
+        currentPiece.y++;
+        dropCounter = 0;
+        sound.drop();
+      } else {
+        lockPiece();
+      }
+    }
+
+    function playerHardDrop() {
+      if (isPaused || isGameOver || !currentPiece) return;
+      sound.init();
+
+      let droppedLines = 0;
+      while (!checkCollision(currentPiece.matrix, currentPiece.x, currentPiece.y + 1)) {
+        currentPiece.y++;
+        droppedLines++;
+      }
+      score += droppedLines * 2;
+      sound.hardDrop();
+      lockPiece();
+    }
+
+    function playerHold() {
+      if (isPaused || isGameOver || !canHold || !currentPiece) return;
+      sound.init();
+
+      const currentType = currentPiece.type;
+      if (holdPieceType === null) {
+        holdPieceType = currentType;
+        spawnPiece();
+      } else {
+        const temp = holdPieceType;
+        holdPieceType = currentType;
+        currentPiece = createPiece(temp);
+      }
+      canHold = false;
+      sound.hold();
+      drawHold();
+    }
+
+    function lockPiece() {
+      for (let r = 0; r < currentPiece.matrix.length; r++) {
+        for (let c = 0; c < currentPiece.matrix[r].length; c++) {
+          if (currentPiece.matrix[r][c] !== 0) {
+            const by = currentPiece.y + r;
+            const bx = currentPiece.x + c;
+            if (by >= 0 && by < ROWS && bx >= 0 && bx < COLS) {
+              board[by][bx] = currentPiece.type;
+            }
+          }
+        }
+      }
+
+      clearLines();
+      spawnPiece();
+    }
+
+    function clearLines() {
+      let linesCleared = 0;
+
+      for (let r = ROWS - 1; r >= 0; r--) {
+        if (board[r].every(cell => cell !== 0)) {
+          board.splice(r, 1);
+          board.unshift(Array(COLS).fill(0));
+          linesCleared++;
+          r++;
+        }
+      }
+
+      if (linesCleared > 0) {
+        lines += linesCleared;
+        const multiplier = DIFFICULTY_SETTINGS[currentDifficulty].scoreMultiplier;
+        const lineScores = [0, 100, 300, 500, 800];
+        score += Math.round((lineScores[linesCleared] || 1000) * level * multiplier);
+
+        const newLevel = Math.floor(lines / 10) + 1;
+        if (newLevel !== level) {
+          level = newLevel;
+          dropInterval = calculateDropInterval();
+        }
+
+        sound.clearLines(linesCleared);
+        updateUI();
+      }
+    }
+
+    function getGhostY() {
+      if (!currentPiece) return 0;
+      let ghostY = currentPiece.y;
+      while (!checkCollision(currentPiece.matrix, currentPiece.x, ghostY + 1)) {
+        ghostY++;
+      }
+      return ghostY;
+    }
+
+    function handleGameOver() {
+      isGameOver = true;
+      sound.gameOver();
+
+      document.getElementById('final-diff').innerText = DIFFICULTY_SETTINGS[currentDifficulty].label;
+      document.getElementById('final-score').innerText = score.toLocaleString();
+      document.getElementById('final-lines').innerText = `${lines} 줄`;
+      gameOverModal.classList.remove('hidden');
+    }
+
+    function togglePause() {
+      if (isGameOver) return;
+      isPaused = !isPaused;
+      if (isPaused) {
+        pauseOverlay.classList.remove('hidden');
+        document.getElementById('pause-btn').innerText = '재개';
+      } else {
+        pauseOverlay.classList.add('hidden');
+        document.getElementById('pause-btn').innerText = '일시정지';
+        lastTime = performance.now();
+      }
+    }
+
+    function updateUI() {
+      scoreDisplay.innerText = score.toLocaleString();
+      linesDisplay.innerText = lines;
+      levelDisplay.innerText = level;
+    }
+
+    /* ==========================================================================
+       4. 그래픽 렌더링
+       ========================================================================== */
+    function drawBlock(ctx, x, y, size, color, isGhost = false) {
+      if (isGhost) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x + 1.5, y + 1.5, size - 3, size - 3);
+        return;
+      }
+
+      const grad = ctx.createLinearGradient(x, y, x + size, y + size);
+      grad.addColorStop(0, color);
+      grad.addColorStop(1, '#0f172a');
+      ctx.fillStyle = grad;
+      ctx.fillRect(x + 1, y + 1, size - 2, size - 2);
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.fillRect(x + 1, y + 1, size - 2, 2);
+      ctx.fillRect(x + 1, y + 1, 2, size - 2);
+
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
+    }
+
+    function render() {
+      boardCtx.fillStyle = '#020617';
+      boardCtx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
+
+      // 격자 라인
+      boardCtx.strokeStyle = 'rgba(30, 41, 59, 0.35)';
+      boardCtx.lineWidth = 0.5;
+      for (let c = 0; c <= COLS; c++) {
+        boardCtx.beginPath();
+        boardCtx.moveTo(c * BLOCK_SIZE, 0);
+        boardCtx.lineTo(c * BLOCK_SIZE, ROWS * BLOCK_SIZE);
+        boardCtx.stroke();
+      }
+      for (let r = 0; r <= ROWS; r++) {
+        boardCtx.beginPath();
+        boardCtx.moveTo(0, r * BLOCK_SIZE);
+        boardCtx.lineTo(COLS * BLOCK_SIZE, r * BLOCK_SIZE);
+        boardCtx.stroke();
+      }
+
+      // 배치된 블록
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const type = board[r][c];
+          if (type !== 0) {
+            drawBlock(boardCtx, c * BLOCK_SIZE, r * BLOCK_SIZE, BLOCK_SIZE, TETROMINOES[type].color);
+          }
+        }
+      }
+
+      // 조작 블록 및 고스트
+      if (currentPiece) {
+        const ghostY = getGhostY();
+        if (ghostY !== currentPiece.y) {
+          const pieceColor = TETROMINOES[currentPiece.type].color;
+          for (let r = 0; r < currentPiece.matrix.length; r++) {
+            for (let c = 0; c < currentPiece.matrix[r].length; c++) {
+              if (currentPiece.matrix[r][c] !== 0) {
+                drawBlock(boardCtx, (currentPiece.x + c) * BLOCK_SIZE, (ghostY + r) * BLOCK_SIZE, BLOCK_SIZE, pieceColor, true);
+              }
+            }
+          }
+        }
+
+        for (let r = 0; r < currentPiece.matrix.length; r++) {
+          for (let c = 0; c < currentPiece.matrix[r].length; c++) {
+            if (currentPiece.matrix[r][c] !== 0) {
+              drawBlock(
+                boardCtx,
+                (currentPiece.x + c) * BLOCK_SIZE,
+                (currentPiece.y + r) * BLOCK_SIZE,
+                BLOCK_SIZE,
+                TETROMINOES[currentPiece.type].color
+              );
+            }
+          }
+        }
+      }
+
+      drawHold();
+      drawNext();
+    }
+
+    function drawMiniPiece(ctx, type, canvasW, canvasH, offsetY = 0) {
+      if (!type) return;
+      const matrix = TETROMINOES[type].shape;
+      const size = 12;
+      const pieceW = matrix[0].length * size;
+      const pieceH = matrix.length * size;
+      const startX = Math.floor((canvasW - pieceW) / 2);
+      const startY = offsetY + Math.floor((canvasH - pieceH) / 2);
+
+      for (let r = 0; r < matrix.length; r++) {
+        for (let c = 0; c < matrix[r].length; c++) {
+          if (matrix[r][c] !== 0) {
+            drawBlock(ctx, startX + c * size, startY + r * size, size, TETROMINOES[type].color);
+          }
+        }
+      }
+    }
+
+    function drawHold() {
+      holdCtx.fillStyle = '#020617';
+      holdCtx.fillRect(0, 0, holdCanvas.width, holdCanvas.height);
+      if (holdPieceType) {
+        drawMiniPiece(holdCtx, holdPieceType, holdCanvas.width, holdCanvas.height);
+      }
+    }
+
+    function drawNext() {
+      nextCtx.fillStyle = '#020617';
+      nextCtx.fillRect(0, 0, nextCanvas.width, nextCanvas.height);
+      const slotHeight = nextCanvas.height / 3;
+
+      nextQueue.forEach((type, idx) => {
+        drawMiniPiece(nextCtx, type, nextCanvas.width, slotHeight, idx * slotHeight);
+      });
+    }
+
+    /* ==========================================================================
+       5. 게임 루프
+       ========================================================================== */
+    function gameLoop(time = 0) {
+      const deltaTime = time - lastTime;
+      lastTime = time;
+
+      if (!isPaused && !isGameOver) {
+        dropCounter += deltaTime;
+        if (dropCounter > dropInterval) {
+          playerDrop();
+        }
+      }
+
+      render();
+      animationFrameId = requestAnimationFrame(gameLoop);
+    }
+
+    /* ==========================================================================
+       6. 입력 바인딩 (키보드 & 터치)
+       ========================================================================== */
+    window.addEventListener('keydown', (e) => {
+      if (isGameOver) return;
+      
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
+        e.preventDefault();
+      }
+
+      switch (e.code) {
+        case 'ArrowLeft': playerMove(-1); break;
+        case 'ArrowRight': playerMove(1); break;
+        case 'ArrowDown': playerDrop(); break;
+        case 'ArrowUp':
+        case 'KeyX': playerRotate(1); break;
+        case 'KeyZ': playerRotate(-1); break;
+        case 'Space': playerHardDrop(); break;
+        case 'KeyC':
+        case 'ShiftLeft':
+        case 'ShiftRight': playerHold(); break;
+        case 'KeyP':
+        case 'Escape': togglePause(); break;
+      }
+    });
+
+    function bindTouchAction(elemId, actionFn) {
+      const el = document.getElementById(elemId);
+      if (!el) return;
+
+      const trigger = (e) => {
+        e.preventDefault();
+        sound.init();
+        actionFn();
+      };
+
+      el.addEventListener('touchstart', trigger, { passive: false });
+      el.addEventListener('click', trigger);
+    }
+
+    bindTouchAction('btn-left', () => playerMove(-1));
+    bindTouchAction('btn-right', () => playerMove(1));
+    bindTouchAction('btn-down', () => playerDrop());
+    bindTouchAction('btn-rot-cw', () => playerRotate(1));
+    bindTouchAction('btn-rot-ccw', () => playerRotate(-1));
+    bindTouchAction('btn-hard-drop', () => playerHardDrop());
+    bindTouchAction('btn-hold', () => playerHold());
+
+    document.getElementById('pause-btn').addEventListener('click', togglePause);
+    document.getElementById('resume-btn').addEventListener('click', togglePause);
+
+    document.getElementById('restart-btn').addEventListener('click', () => {
+      isPaused = true;
+      diffModal.classList.remove('hidden');
+    });
+
+    document.getElementById('change-diff-btn').addEventListener('click', () => {
+      gameOverModal.classList.add('hidden');
+      diffModal.classList.remove('hidden');
+    });
+
+    document.getElementById('retry-btn').addEventListener('click', () => {
+      startNewGame(currentDifficulty);
+    });
+
+    document.querySelectorAll('.diff-select-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const diff = btn.getAttribute('data-diff');
+        startNewGame(diff);
+      });
+    });
+
+    const soundBtn = document.getElementById('sound-btn');
+    soundBtn.addEventListener('click', () => {
+      sound.muted = !sound.muted;
+      soundBtn.innerText = sound.muted ? '🔇' : '🔊';
+    });
+
+    // 화면 시작 초기화
+    resetBoard();
+    updateUI();
+    render();
+  </script>
+</body>
+</html>
